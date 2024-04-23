@@ -21,7 +21,7 @@ pub fn insert_user(conn: &PgConnection, name: &str, password: &str) -> Result<Us
     let new_user = NewUser {
         name,
         password,
-        token: 0, // Assuming a default token value of 0
+        token: 3,
         is_admin: false,
     };
 
