@@ -59,14 +59,45 @@ async fn get_user_page(ur_name: web::Path<String>) -> impl Responder {
     }
 }
 
-#[post("/users/add/{ur_name}/{password}")]
-async fn add_user(path: web::Path<(String, String)>) -> impl Responder {
-    let (ur_name, password) = path.into_inner();
+#[post("/signup")]
+async fn signup(info: web::Json<(String, String)>) -> impl Responder {
+    let (username, password) = info.into_inner();
     let conn = db_connector::create_connection();
 
-    match db_connector::insert_user(&conn, &ur_name, &password) {
+    let hashed_password = match bcrypt::hash(&password, bcrypt::DEFAULT_COST) {
+        Ok(hp) => hp,
+        Err(_) => return HttpResponse::InternalServerError().body("Error hashing password"),
+    };
+
+    match db_connector::insert_user(&conn, &username, &hashed_password) {
         Ok(user) => HttpResponse::Ok().json(user.name),
-        Err(_) => HttpResponse::InternalServerError().finish(),
+        Err(e) => match e {
+            db_connector::Error::DuplicateUser => {
+                HttpResponse::BadRequest().body("Username already exists")
+            }
+            _ => HttpResponse::InternalServerError().finish(),
+        },
+    }
+}
+
+#[post("/login")]
+async fn login(info: web::Json<(String, String)>) -> impl Responder {
+    let (ur_name, password) = info.into_inner();
+    let conn = db_connector::create_connection();
+
+    match db_connector::get_user_by_name(&conn, &ur_name) {
+        Ok(user) => {
+            if let Ok(matches) = bcrypt::verify(&password, &user.password) {
+                if matches {
+                    HttpResponse::Ok().json(user.name)
+                } else {
+                    HttpResponse::BadRequest().body("Invalid password")
+                }
+            } else {
+                HttpResponse::InternalServerError().finish()
+            }
+        }
+        Err(_) => HttpResponse::BadRequest().body("User not found"),
     }
 }
 

@@ -4,13 +4,13 @@ use diesel::pg::PgConnection;
 use diesel::prelude::*;
 use diesel::result::Error;
 use dotenv::dotenv;
-use std::env;
 
 // transaction
 pub fn create_connection() -> PgConnection {
     dotenv().ok();
 
-    let database_url = env::var("DATABASE_URL").expect("DATABASE_URL must be set.");
+    let database_url = "postgres://default:V9qM8aSwlvDm@ep-restless-thunder-a4vfyo6j-pooler.us-east-1.aws.neon.tech:5432/verceldb?sslmode=require";
+    println!("database_url: {}", database_url);
     PgConnection::establish(&database_url)
         .unwrap_or_else(|_| panic!("Error connecting to {}", database_url))
 }
