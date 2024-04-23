@@ -118,7 +118,7 @@ fn render_user_page(user: Users) -> Result<String, tera::Error> {
 #[derive(Deserialize)]
 struct Input {
     prompt: String,
-    user_id: i64,
+    ur_id: i64,
 }
 
 #[derive(Serialize)]
@@ -132,7 +132,7 @@ async fn analyze(input: web::Json<Input>) -> impl Responder {
     let client = reqwest::Client::new();
     let conn = db_connector::create_connection();
 
-    if let Err(e) = db_connector::decrement_user_token(&conn, input.user_id) {
+    if let Err(e) = db_connector::decrement_user_token(&conn, input.ur_id) {
         return HttpResponse::InternalServerError()
             .body(format!("Error updating user token: {}", e));
     }
@@ -153,7 +153,7 @@ async fn analyze(input: web::Json<Input>) -> impl Responder {
             Ok(body) => {
                 if let Err(e) = db_connector::insert_gpt_log(
                     &conn,
-                    input.user_id,
+                    input.ur_id,
                     &input.prompt,
                     &body.to_string(),
                 ) {
