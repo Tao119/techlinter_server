@@ -141,9 +141,14 @@ async fn analyze(input: web::Json<Input>) -> impl Responder {
         .post("https://api.openai.com/v1/completions")
         .header("Authorization", format!("Bearer {}", api_key))
         .json(&serde_json::json!({
-            "model": "text-davinci-003",
-            "prompt": input.prompt,
-            "max_tokens": 100
+            "model": "gpt-4",
+            "messages":
+            [
+                {"role": "user", "content": input.prompt}
+            ],
+            "n":1,
+            "stop":null,
+            "temperature":0,
         }))
         .send()
         .await;
