@@ -1,10 +1,8 @@
-use crate::db_connector;
+use crate::db_connector::{self};
 use crate::models::Users;
 use actix_web::{get, post, web, App, HttpResponse, HttpServer, Responder};
 use diesel::result::Error;
-use reqwest::Client;
 use serde::{Deserialize, Serialize};
-use std::env;
 use tera::{Context, Tera};
 
 pub async fn create_app(addr: &str, port: u16) -> std::io::Result<()> {
@@ -130,8 +128,8 @@ struct GptResponse {
 
 #[post("/analyze")]
 async fn analyze(input: web::Json<Input>) -> impl Responder {
-    let api_key = env::var("OPENAI_API_KEY").expect("OPENAI_API_KEY not set");
-    let client = Client::new();
+    let api_key = std::env::var("OPENAI_API_KEY").expect("OPENAI_API_KEY not set");
+    let client = reqwest::Client::new();
     let conn = db_connector::create_connection();
 
     if let Err(e) = db_connector::decrement_user_token(&conn, input.user_id) {
@@ -144,15 +142,27 @@ async fn analyze(input: web::Json<Input>) -> impl Responder {
         .header("Authorization", format!("Bearer {}", api_key))
         .json(&serde_json::json!({
             "model": "text-davinci-003",
-            "messages": {"role": "user", "content": input.prompt},
-            "temperature": 0
+            "prompt": input.prompt,
+            "max_tokens": 100
         }))
         .send()
         .await;
 
     match response {
         Ok(resp) => match resp.json::<serde_json::Value>().await {
-            Ok(body) => HttpResponse::Ok().json(GptResponse { response: body }),
+            Ok(body) => {
+                if let Err(e) = db_connector::insert_gpt_log(
+                    &conn,
+                    input.user_id,
+                    &input.prompt,
+                    &body.to_string(),
+                ) {
+                    HttpResponse::InternalServerError()
+                        .body(format!("Failed to log GPT response: {}", e))
+                } else {
+                    HttpResponse::Ok().json(GptResponse { response: body })
+                }
+            }
             Err(_) => HttpResponse::InternalServerError().json("Failed to parse response"),
         },
         Err(_) => HttpResponse::InternalServerError().json("Failed to contact API"),

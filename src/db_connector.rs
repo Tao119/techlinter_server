@@ -1,5 +1,6 @@
 use super::models::*;
 use super::schema::*;
+use diesel::insert_into;
 use diesel::pg::PgConnection;
 use diesel::prelude::*;
 use diesel::result::DatabaseErrorKind;
@@ -65,4 +66,19 @@ pub fn decrement_user_token(conn: &PgConnection, user_id: i64) -> Result<Users, 
             ))
         }
     })
+}
+
+pub fn insert_gpt_log(
+    conn: &PgConnection,
+    ur_id: i64,
+    code: &str,
+    output: &str,
+) -> Result<usize, diesel::result::Error> {
+    let new_log = NewLog {
+        ur_id,
+        code,
+        output,
+    };
+
+    insert_into(gpt_logs::table).values(&new_log).execute(conn)
 }
