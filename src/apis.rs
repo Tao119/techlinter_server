@@ -78,14 +78,10 @@ async fn signup(info: web::Json<SignInInput>) -> impl Responder {
     };
 
     match db_connector::insert_user(&conn, &ur_name, &hashed_password) {
-        Ok(user) => HttpResponse::Ok().json(user.name),
+        Ok(user) => HttpResponse::Ok().json(user),
         Err(Error::NotFound) => HttpResponse::BadRequest().body("Username already exists"),
         Err(_) => HttpResponse::InternalServerError().finish(),
     }
-}
-#[derive(Serialize)]
-struct UserIdResponse {
-    id: i64,
 }
 
 #[post("/login")]
@@ -99,7 +95,7 @@ async fn login(info: web::Json<SignInInput>) -> impl Responder {
         Ok(user) => {
             if let Ok(matches) = bcrypt::verify(password, &user.password) {
                 if matches {
-                    HttpResponse::Ok().json(UserIdResponse { id: user.id })
+                    HttpResponse::Ok().json(user)
                 } else {
                     HttpResponse::BadRequest().body("Invalid password")
                 }
