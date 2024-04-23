@@ -83,6 +83,10 @@ async fn signup(info: web::Json<SignInInput>) -> impl Responder {
         Err(_) => HttpResponse::InternalServerError().finish(),
     }
 }
+#[derive(Serialize)]
+struct UserIdResponse {
+    id: i64,
+}
 
 #[post("/login")]
 async fn login(info: web::Json<SignInInput>) -> impl Responder {
@@ -95,7 +99,7 @@ async fn login(info: web::Json<SignInInput>) -> impl Responder {
         Ok(user) => {
             if let Ok(matches) = bcrypt::verify(password, &user.password) {
                 if matches {
-                    HttpResponse::Ok().json(user.name)
+                    HttpResponse::Ok().json(UserIdResponse { id: user.id })
                 } else {
                     HttpResponse::BadRequest().body("Invalid password")
                 }
