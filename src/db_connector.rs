@@ -2,6 +2,7 @@ use super::models::*;
 use super::schema::*;
 use diesel::pg::PgConnection;
 use diesel::prelude::*;
+use diesel::result::DatabaseErrorKind;
 use diesel::result::Error;
 use dotenv::dotenv;
 
@@ -10,8 +11,7 @@ pub fn create_connection() -> PgConnection {
     dotenv().ok();
 
     let database_url = "postgres://default:V9qM8aSwlvDm@ep-restless-thunder-a4vfyo6j-pooler.us-east-1.aws.neon.tech:5432/verceldb?sslmode=require";
-    println!("database_url: {}", database_url);
-    PgConnection::establish(&database_url)
+    PgConnection::establish(database_url)
         .unwrap_or_else(|_| panic!("Error connecting to {}", database_url))
 }
 
@@ -47,25 +47,22 @@ where
     Ok(connection.test_transaction(|| test_fn(&connection)))
 }
 
-// #[cfg(test)]
-// #[allow(non_snake_case)]
-// mod unit_DBテスト {
-//     use super::*;
-
-//     #[test]
-//     fn get_user_by_id関数() {
-//         test_transaction(|conn| {
-//             insert_user(conn, "testUser", "12345678")?;
-
-//             let users = get_user_by_name(conn, "testUser")?;
-
-//             let user = &users;
-//             assert_eq!(user.name, "testUser");
-//             assert_eq!(user.password, "12345678");
-//             assert_eq!(user.token, 0);
-
-//             Ok(())
-//         })
-//         .unwrap();
-//     }
-// }
+pub fn decrement_user_token(conn: &PgConnection, user_id: i64) -> Result<Users, Error> {
+    conn.transaction::<_, Error, _>(|| {
+        let user = users::table
+            .find(user_id)
+            .for_update()
+            .first::<Users>(conn)?;
+        if user.token > 0 {
+            let updated_user = diesel::update(users::table.find(user_id))
+                .set(users::token.eq(user.token - 1))
+                .get_result::<Users>(conn)?;
+            Ok(updated_user)
+        } else {
+            Err(Error::DatabaseError(
+                DatabaseErrorKind::__Unknown,
+                Box::new("no token left".to_string()),
+            ))
+        }
+    })
+}

@@ -1,6 +1,7 @@
 use crate::db_connector;
 use crate::models::Users;
 use actix_web::{get, post, web, App, HttpResponse, HttpServer, Responder};
+use diesel::result::Error;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::env;
@@ -11,7 +12,8 @@ pub async fn create_app(addr: &str, port: u16) -> std::io::Result<()> {
         App::new()
             .service(hello)
             .service(get_user_page)
-            .service(add_user)
+            .service(signup)
+            .service(login)
             .service(analyze)
             .service(fixed)
     })
@@ -59,35 +61,41 @@ async fn get_user_page(ur_name: web::Path<String>) -> impl Responder {
     }
 }
 
+#[derive(Deserialize)]
+struct SignInInput {
+    name: String,
+    password: String,
+}
+
 #[post("/signup")]
-async fn signup(info: web::Json<(String, String)>) -> impl Responder {
-    let (username, password) = info.into_inner();
+async fn signup(info: web::Json<SignInInput>) -> impl Responder {
+    let input = info.into_inner();
+    let ur_name = input.name;
+    let password = input.password;
     let conn = db_connector::create_connection();
 
-    let hashed_password = match bcrypt::hash(&password, bcrypt::DEFAULT_COST) {
+    let hashed_password = match bcrypt::hash(password, bcrypt::DEFAULT_COST) {
         Ok(hp) => hp,
         Err(_) => return HttpResponse::InternalServerError().body("Error hashing password"),
     };
 
-    match db_connector::insert_user(&conn, &username, &hashed_password) {
+    match db_connector::insert_user(&conn, &ur_name, &hashed_password) {
         Ok(user) => HttpResponse::Ok().json(user.name),
-        Err(e) => match e {
-            db_connector::Error::DuplicateUser => {
-                HttpResponse::BadRequest().body("Username already exists")
-            }
-            _ => HttpResponse::InternalServerError().finish(),
-        },
+        Err(Error::NotFound) => HttpResponse::BadRequest().body("Username already exists"),
+        Err(_) => HttpResponse::InternalServerError().finish(),
     }
 }
 
 #[post("/login")]
-async fn login(info: web::Json<(String, String)>) -> impl Responder {
-    let (ur_name, password) = info.into_inner();
+async fn login(info: web::Json<SignInInput>) -> impl Responder {
+    let input = info.into_inner();
+    let ur_name = input.name;
+    let password = input.password;
     let conn = db_connector::create_connection();
 
     match db_connector::get_user_by_name(&conn, &ur_name) {
         Ok(user) => {
-            if let Ok(matches) = bcrypt::verify(&password, &user.password) {
+            if let Ok(matches) = bcrypt::verify(password, &user.password) {
                 if matches {
                     HttpResponse::Ok().json(user.name)
                 } else {
@@ -112,6 +120,7 @@ fn render_user_page(user: Users) -> Result<String, tera::Error> {
 #[derive(Deserialize)]
 struct Input {
     prompt: String,
+    user_id: i64,
 }
 
 #[derive(Serialize)]
@@ -123,6 +132,13 @@ struct GptResponse {
 async fn analyze(input: web::Json<Input>) -> impl Responder {
     let api_key = env::var("OPENAI_API_KEY").expect("OPENAI_API_KEY not set");
     let client = Client::new();
+    let conn = db_connector::create_connection();
+
+    if let Err(e) = db_connector::decrement_user_token(&conn, input.user_id) {
+        return HttpResponse::InternalServerError()
+            .body(format!("Error updating user token: {}", e));
+    }
+
     let response = client
         .post("https://api.openai.com/v1/completions")
         .header("Authorization", format!("Bearer {}", api_key))
