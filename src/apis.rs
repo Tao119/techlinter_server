@@ -25,7 +25,6 @@ async fn hello() -> impl Responder {
     let conn = db_connector::create_connection();
 
     let users = match db_connector::get_users(&conn).await {
-        // Assuming get_users is async
         Ok(users) if !users.is_empty() => users,
         Ok(_) => return HttpResponse::NotFound().body("No users found."),
         Err(e) => {
@@ -33,8 +32,7 @@ async fn hello() -> impl Responder {
         }
     };
 
-    // Using user data to construct a response
-    let name = &users[0].name; // Safely assuming there is at least one user due to the check above
+    let name = &users[0].name;
     HttpResponse::Ok().body(format!(
         "
     <div>Title</div>
@@ -87,23 +85,26 @@ async fn signup(info: web::Json<SignInInput>) -> impl Responder {
 #[post("/login")]
 async fn login(info: web::Json<SignInInput>) -> impl Responder {
     let input = info.into_inner();
-    let ur_name = input.name;
-    let password = input.password;
     let conn = db_connector::create_connection();
 
-    match db_connector::get_user_by_name(&conn, &ur_name) {
-        Ok(user) => {
-            if let Ok(matches) = bcrypt::verify(password, &user.password) {
+    match db_connector::get_user_by_name(&conn, &input.name) {
+        Ok(user) => match bcrypt::verify(&input.password, &user.password) {
+            Ok(matches) => {
                 if matches {
                     HttpResponse::Ok().json(user)
                 } else {
-                    HttpResponse::BadRequest().body("Invalid password")
+                    HttpResponse::Unauthorized().body("Invalid password")
                 }
-            } else {
-                HttpResponse::InternalServerError().finish()
             }
+            Err(_) => {
+                log::error!("Password verification failed for user: {}", input.name);
+                HttpResponse::InternalServerError().body("Password verification failed")
+            }
+        },
+        Err(_) => {
+            log::info!("User not found: {}", input.name);
+            HttpResponse::NotFound().body("User not found")
         }
-        Err(_) => HttpResponse::BadRequest().body("User not found"),
     }
 }
 
@@ -132,23 +133,23 @@ async fn analyze(input: web::Json<Input>) -> impl Responder {
     let client = reqwest::Client::new();
     let conn = db_connector::create_connection();
 
-    if let Err(e) = db_connector::decrement_user_token(&conn, input.ur_id) {
-        return HttpResponse::InternalServerError()
-            .body(format!("Error updating user token: {}", e));
+    let user = db_connector::get_user_by_id(&conn, &input.ur_id).expect("no user found");
+    if !user.is_admin {
+        if let Err(e) = db_connector::decrement_user_token(&conn, input.ur_id) {
+            return HttpResponse::InternalServerError()
+                .body(format!("Error updating user token: {}", e));
+        }
     }
 
     let response = client
-        .post("https://api.openai.com/v1/completions")
+        .post("https://api.openai.com/v1/chat/completions")
         .header("Authorization", format!("Bearer {}", api_key))
         .json(&serde_json::json!({
             "model": "gpt-4",
-            "messages":
-            [
-                {"role": "user", "content": input.prompt}
-            ],
-            "n":1,
-            "stop":null,
-            "temperature":0,
+            "messages": [{"role": "user", "content": input.prompt}],
+            "n": 1,
+            "stop": null,
+            "temperature": 0
         }))
         .send()
         .await;
@@ -156,16 +157,25 @@ async fn analyze(input: web::Json<Input>) -> impl Responder {
     match response {
         Ok(resp) => match resp.json::<serde_json::Value>().await {
             Ok(body) => {
+                let conn = db_connector::create_connection();
                 if let Err(e) = db_connector::insert_gpt_log(
                     &conn,
                     input.ur_id,
                     &input.prompt,
                     &body.to_string(),
                 ) {
-                    HttpResponse::InternalServerError()
-                        .body(format!("Failed to log GPT response: {}", e))
-                } else {
-                    HttpResponse::Ok().json(GptResponse { response: body })
+                    eprintln!("Failed to log GPT response: {}", e);
+                }
+
+                match body["choices"][0]["message"]["content"].clone() {
+                    serde_json::Value::String(json_string) => {
+                        HttpResponse::Ok().json(GptResponse {
+                            response: json_string.into(),
+                        })
+                    }
+                    _ => {
+                        HttpResponse::InternalServerError().json("Expected JSON string in response")
+                    }
                 }
             }
             Err(_) => HttpResponse::InternalServerError().json("Failed to parse response"),

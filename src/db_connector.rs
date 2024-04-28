@@ -35,6 +35,10 @@ pub fn get_user_by_name(conn: &PgConnection, ur_name: &str) -> Result<Users, Err
     users::table.filter(users::name.eq(ur_name)).first(conn)
 }
 
+pub fn get_user_by_id(conn: &PgConnection, ur_id: &i64) -> Result<Users, Error> {
+    users::table.filter(users::id.eq(ur_id)).first(conn)
+}
+
 pub async fn get_users(conn: &PgConnection) -> Result<Vec<Users>, Error> {
     users::table.load::<Users>(conn)
 }
